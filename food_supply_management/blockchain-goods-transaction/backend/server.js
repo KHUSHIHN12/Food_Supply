@@ -1,55 +1,51 @@
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const transactionRoutes = require('./routes/transactionRoutes');
-require('./db');
+const express = require("express");
+const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
+const { ethers } = require("ethers");
 
 const app = express();
+const frontendDir = path.join(__dirname, "..", "frontend");
+const contractConfigPath = path.join(__dirname, "contract-config.json");
+const rpcUrl = process.env.GANACHE_RPC_URL || "http://127.0.0.1:7545";
+
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
+app.use(express.static(frontendDir));
 
-app.use('/api', transactionRoutes);
-
-const BlockModel = require('./models/BlockModel');
-const blockchain = require('./blockchain/Blockchain');
-
-async function storeGenesis() {
-  const count = await BlockModel.countDocuments();
-
-  if (count === 0) {
-    const genesis = blockchain.chain[0];
-
-    await BlockModel.updateOne(
-      { currentHash: genesis.currentHash },
-      {
-        $set: {
-      sender: genesis.sender,
-      receiver: genesis.receiver,
-      vehicle: genesis.vehicle,
-      goods: genesis.goods,
-      quantity: genesis.quantity,
-      transportCost: genesis.transportCost,
-      paymentAmount: genesis.paymentAmount,
-      gasUsed: genesis.gasUsed,
-      balanceBefore: genesis.balanceBefore,
-      balanceAfter: genesis.balanceAfter,
-      previousHash: genesis.previousHash,
-      currentHash: genesis.currentHash,
-      timestamp: genesis.timestamp
-        }
-      },
-      { upsert: true }
-    );
-
-    console.log("Genesis block stored in DB");
+app.get("/api/contract", (req, res) => {
+  if (!fs.existsSync(contractConfigPath)) {
+    return res.status(404).json({
+      error: "Contract not deployed yet. Run the Ganache deployment script first."
+    });
   }
-}
 
-storeGenesis().catch((err) => console.log(err.message));
-
-app.get('/', (req, res) => {
-  res.send('Blockchain Goods Transaction System Backend is running...');
+  const contractConfig = JSON.parse(fs.readFileSync(contractConfigPath, "utf8"));
+  return res.json(contractConfig);
 });
 
-const PORT = 5000;
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.get("/api/accounts", async (req, res) => {
+  try {
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const accounts = await provider.send("eth_accounts", []);
+    res.json(accounts);
+  } catch (error) {
+    res.status(500).json({
+      error: "Unable to fetch Ganache accounts.",
+      details: error.message
+    });
+  }
+});
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(frontendDir, "index.html"));
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
